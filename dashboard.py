@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import tkinter as tk
 from tkinter import ttk
+from matplotlib.dates import DateFormatter
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.svm import SVC
@@ -18,6 +19,9 @@ import time
 # Set matplotlib backend for Tkinter
 import matplotlib
 matplotlib.use("TkAgg")
+
+# Define selected_product globally for accessibility in animation functions
+selected_product = None
 
 # Function to load and prepare data for Revenue Over Time by Product Category graph
 def load_and_prepare_first_graph_data():
@@ -49,53 +53,16 @@ def load_and_prepare_third_graph_data():
     data_transposed.index = pd.to_datetime(data_transposed.index, dayfirst=True)
     return data_transposed
 
-# Initialize data for graphs
-grouped_data_first_graph = load_and_prepare_first_graph_data()
-real_time_data = load_and_prepare_second_graph_data()
-data_transposed = load_and_prepare_third_graph_data()
-
-# Initialize start time for real-time revenue graph
-start_time = time.time()
-
-# Setup Tkinter main window
-root = tk.Tk()
-root.title("Dashboard")
-root.geometry("1500x900")
-
-# Create a Notebook widget for multiple tabs
-notebook = ttk.Notebook(root)
-notebook.pack(fill='both', expand=True)
-
-# Define and add tabs to the notebook
-home_tab = tk.Frame(notebook)
-regression_tab = tk.Frame(notebook)
-classification_clustering_tab = tk.Frame(notebook)
-
-notebook.add(home_tab, text="Home")
-notebook.add(regression_tab, text="Regression")
-notebook.add(classification_clustering_tab, text="Classification & Clustering")
-
-# Setup Home tab with grid layout for graphs
-fig_home = plt.figure(figsize=(18, 10))
-gs = gridspec.GridSpec(2, 2, height_ratios=[1, 1], hspace=0.5)
-
-# Define subplots for each graph in the Home tab
-ax1 = fig_home.add_subplot(gs[0, 0])   # Top-left for revenue by category graph
-ax3 = fig_home.add_subplot(gs[0, 1])   # Top-right for stock level graph
-ax2 = fig_home.add_subplot(gs[1, :])   # Bottom for real-time revenue graph
-
-# Embed Home tab graph canvas in Tkinter
-canvas_home = FigureCanvasTkAgg(fig_home, master=home_tab)
-canvas_home.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
-
-# Dropdown for selecting product in Home tab (for stock level graph)
-dropdown_frame = tk.Frame(home_tab, bg="#2C3E50")
-dropdown_frame.place(relx=0.71, rely=0.07, anchor="center")
-dropdown_label = tk.Label(dropdown_frame, text="Select Product:", fg="white", bg="#2C3E50", font=("Arial", 12))
-dropdown_label.pack(side=tk.LEFT, padx=5)
-selected_product = tk.StringVar(value=data_transposed.columns[0])
-dropdown = ttk.Combobox(dropdown_frame, textvariable=selected_product, values=list(data_transposed.columns), width=25, font=("Arial", 10))
-dropdown.pack(side=tk.LEFT)
+# Function to prepare data for regression based on selected category
+def load_and_prepare_regression_data(category):
+    data = pd.read_csv('shopee_sales_report_2022_to_2024.csv')
+    data_filtered = data[data['Product Category'] == category].copy()
+    data_filtered['DateTime'] = pd.to_datetime(data_filtered['DateTime'], dayfirst=True, errors='coerce')
+    data_filtered['MonthYear'] = data_filtered['DateTime'].dt.to_period('M')
+    grouped_data = data_filtered.groupby('MonthYear')['Revenue (MYR)'].sum().reset_index()
+    grouped_data['MonthYear'] = grouped_data['MonthYear'].dt.to_timestamp()
+    grouped_data['MonthNumber'] = np.arange(len(grouped_data))
+    return grouped_data
 
 # Animation functions for each graph in Home tab
 def animate_first_graph(i):
@@ -152,7 +119,229 @@ def start_third_graph_animation():
 def on_dropdown_change(*args):
     start_third_graph_animation()
 
-# Bind the callback to the dropdown selection change
+# Function to set up regression graphs
+from matplotlib.dates import DateFormatter
+
+def setup_regression_graphs(tab):
+    # Create a frame for the dropdown menu at the top of the tab
+    category_frame = tk.Frame(tab, bg="#2C3E50")
+    category_frame.pack(anchor="center", pady=5)
+    category_label = tk.Label(category_frame, text="Select Category:", fg="white", bg="#2C3E50", font=("Arial", 12))
+    category_label.pack(side=tk.LEFT, padx=5)
+
+    # Dropdown for selecting the category
+    categories = grouped_data_first_graph.columns.tolist()
+    selected_category = tk.StringVar(value=categories[0])
+    category_dropdown = ttk.Combobox(category_frame, textvariable=selected_category, values=categories, width=25, font=("Arial", 10))
+    category_dropdown.pack(side=tk.LEFT)
+
+    # Create the figure and axes outside the update function
+    fig_reg, (ax_reg1, ax_reg2) = plt.subplots(1, 2, figsize=(14, 6))
+    canvas_reg = FigureCanvasTkAgg(fig_reg, master=tab)
+
+    # Function to update the regression plots based on the selected category
+    def update_regression_plots(*args):
+        category = selected_category.get()
+        regression_data = load_and_prepare_regression_data(category)
+        if not regression_data.empty:
+            X = regression_data[['MonthNumber']]
+            y = regression_data['Revenue (MYR)']
+        
+            # Clear previous plots
+            ax_reg1.cla()
+            ax_reg2.cla()
+        
+            # Linear Regression
+            linear_model = LinearRegression()
+            linear_model.fit(X, y)
+            predictions = linear_model.predict(X)
+            ax_reg1.plot(regression_data['MonthYear'], y, 'o', color='blue', label='Actual Revenue')  # Set actual revenue dots to blue
+            ax_reg1.plot(regression_data['MonthYear'], predictions, '-', color='red', label='Predicted Revenue')  # Set predicted line to red
+            ax_reg1.set_title(f'Linear Regression of Monthly Revenue for {category}')
+            ax_reg1.set_xlabel('Month')
+            ax_reg1.set_ylabel('Revenue (MYR)')
+            ax_reg1.legend()
+        
+            # Format x-axis as "Jan 2022"
+            ax_reg1.xaxis.set_major_formatter(DateFormatter('%b %Y'))
+            for label in ax_reg1.get_xticklabels():
+                label.set_rotation(55)
+                label.set_ha('right')
+                label.set_fontsize(6)
+
+            # Decision Tree Regression with two depths
+            X_high_res = pd.DataFrame({'MonthNumber': np.arange(X['MonthNumber'].min(), X['MonthNumber'].max() + 1, 0.1)})
+            ax_reg2.scatter(X['MonthNumber'], y, color='orange', label='Actual Data')  # Set actual data points to orange
+
+            # Decision tree with max_depth=2
+            decision_tree_min_depth = DecisionTreeRegressor(max_depth=2)
+            decision_tree_min_depth.fit(X, y)
+            y_pred_min_depth = decision_tree_min_depth.predict(X_high_res)
+            ax_reg2.plot(X_high_res['MonthNumber'], y_pred_min_depth, color='blue', label='min depth (max_depth=2)')
+
+            # Decision tree with max_depth=5
+            decision_tree_max_depth = DecisionTreeRegressor(max_depth=5)
+            decision_tree_max_depth.fit(X, y)
+            y_pred_max_depth = decision_tree_max_depth.predict(X_high_res)
+            ax_reg2.plot(X_high_res['MonthNumber'], y_pred_max_depth, color='green', label='max depth (max_depth=5)')
+        
+            ax_reg2.set_title(f'Decision Tree Regression of Monthly Revenue for {category}')
+            ax_reg2.set_xlabel('Month')
+            ax_reg2.set_ylabel('Revenue (MYR)')
+            ax_reg2.legend()
+
+            # Format x-axis as "Jan 2022"
+            ax_reg2.set_xticks(X['MonthNumber'])
+            ax_reg2.set_xticklabels(regression_data['MonthYear'].dt.strftime('%b %Y'), rotation=55, ha='right', fontsize=6)
+
+        # Redraw the canvas to reflect the updates
+        canvas_reg.draw()
+    
+    # Bind the dropdown selection to update the plots
+    selected_category.trace("w", update_regression_plots)
+
+    # Initial plot setup
+    update_regression_plots()  # Call once to initialize the plots with the default selected category
+    canvas_reg.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+   
+# Function to set up classification graphs
+def setup_classification_graphs(tab, product_data):
+    fig_class, (ax_class1, ax_class2) = plt.subplots(1, 2, figsize=(14, 6))
+    
+    # Logistic Regression graph with threshold label
+    X = product_data[['Log_Sales_Volume']].values
+    y = (product_data['Sales_Volume'] > np.median(product_data['Sales_Volume'])).astype(int)
+    scaler = StandardScaler()
+    X_standardized = scaler.fit_transform(X)
+    model = LogisticRegression()
+    model.fit(X_standardized, y)
+    X_test_standardized = np.linspace(X_standardized.min() - 1, X_standardized.max() + 1, 300).reshape(-1, 1)
+    y_prob = model.predict_proba(X_test_standardized)[:, 1]
+    ax_class1.scatter(X_standardized[y == 0], y[y == 0], color='red', s=50, label="Low Demand", marker='o')
+    ax_class1.scatter(X_standardized[y == 1], y[y == 1], color='green', s=50, label="High Demand", marker='o')
+    ax_class1.plot(X_test_standardized, y_prob, color='blue', linewidth=2, label="Logistic Regression Curve")
+    ax_class1.axhline(y=0.5, color='gray', linestyle='--')
+    ax_class1.annotate('Threshold', xy=(0, 0.5), xytext=(-1.5, 0.4), arrowprops=dict(facecolor='black', arrowstyle='->'))
+    ax_class1.set_title("Logistic Regression Demand Classification")
+    ax_class1.set_xlabel("Sales Volume")
+    ax_class1.set_ylabel("Probability of High Demand")
+    ax_class1.legend()
+    ax_class1.grid(True)
+
+    # SVM Classification graph with x/y axis limits
+    X = product_data[['Log_Sales_Volume', 'Log_Restock_Frequency']].values
+    scaler = StandardScaler()
+    X_standardized = scaler.fit_transform(X)
+    y = np.array([1 if volume > np.median(product_data['Sales_Volume']) else 0 for volume in product_data['Sales_Volume']])
+    svm_model = SVC(kernel='linear')
+    svm_model.fit(X_standardized, y)
+    w = svm_model.coef_[0]
+    a = -w[0] / w[1]
+    xx = np.linspace(X_standardized[:, 0].min() - 1, X_standardized[:, 0].max() + 1)
+    yy = a * xx - (svm_model.intercept_[0]) / w[1]
+    ax_class2.scatter(X_standardized[y == 0][:, 0], X_standardized[y == 0][:, 1], color='blue', s=100, label="Low Demand", marker='o')
+    ax_class2.scatter(X_standardized[y == 1][:, 0], X_standardized[y == 1][:, 1], color='orange', s=100, label="High Demand", marker='^')
+    ax_class2.plot(xx, yy, 'r--', label="Hyperline")
+    ax_class2.set_xlim(-2, 2)  # x-axis limits
+    ax_class2.set_ylim(-2, 2)  # y-axis limits
+    ax_class2.set_title("SVM Demand Classification")
+    ax_class2.set_xlabel("Log-Transformed Sales Volume")
+    ax_class2.set_ylabel("Log-Transformed Restock Frequency")
+    ax_class2.legend()
+    ax_class2.grid(True)
+
+    canvas_class = FigureCanvasTkAgg(fig_class, master=tab)
+    canvas_class.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+# Function to set up clustering graphs
+def setup_clustering_graphs(tab, product_data):
+    fig_cluster, (ax_cluster1, ax_cluster2) = plt.subplots(1, 2, figsize=(14, 6))
+
+    # K-Means Clustering graph
+    X = product_data[['Sales_Volume', 'Restock_Frequency']].values
+    kmeans = KMeans(n_clusters=2, random_state=0)
+    y_kmeans = kmeans.fit_predict(X)
+    centers = kmeans.cluster_centers_
+    ax_cluster1.scatter(X[y_kmeans == 0][:, 0], X[y_kmeans == 0][:, 1], color='blue', label="Low Demand", marker='^')
+    ax_cluster1.scatter(X[y_kmeans == 1][:, 0], X[y_kmeans == 1][:, 1], color='red', label="High Demand", marker='o')
+    ax_cluster1.scatter(centers[:, 0], centers[:, 1], color='black', marker='X', s=200, label="Centroids")
+    ax_cluster1.set_title("K-Means Clustering for Product Demand Level")
+    ax_cluster1.set_xlabel("Sales Volume")
+    ax_cluster1.set_ylabel("Restock Frequency")
+    ax_cluster1.legend()
+    ax_cluster1.grid(True)
+
+    # Hierarchical Clustering Dendrogram
+    Z = linkage(X, method='ward')
+    dendrogram(Z, labels=product_data['Product'].values, leaf_rotation=90, leaf_font_size=4, ax=ax_cluster2)  # Increased leaf_font_size
+    ax_cluster2.set_title("Hierarchical Clustering Dendrogram for Product Demand Level")
+    ax_cluster2.set_xlabel("Products")
+    ax_cluster2.set_ylabel("Distance")
+
+    # Adjust layout and add bottom padding to move the graph up and make space for larger labels
+    fig_cluster.tight_layout()
+    fig_cluster.subplots_adjust(bottom=0.25)
+
+    # Embed Clustering tab plots in Tkinter
+    canvas_cluster = FigureCanvasTkAgg(fig_cluster, master=tab)
+    canvas_cluster.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+# Initialize data for graphs
+grouped_data_first_graph = load_and_prepare_first_graph_data()
+real_time_data = load_and_prepare_second_graph_data()
+data_transposed = load_and_prepare_third_graph_data()
+
+# Initialize start time for real-time revenue graph
+start_time = time.time()
+
+# Setup Tkinter main window
+root = tk.Tk()
+root.title("Dashboard")
+root.geometry("1500x900")
+
+# Create a Notebook widget for multiple tabs
+notebook = ttk.Notebook(root)
+notebook.pack(fill='both', expand=True)
+
+# Define and add tabs to the notebook
+home_tab = tk.Frame(notebook)
+regression_tab = tk.Frame(notebook)
+classification_tab = tk.Frame(notebook)
+clustering_tab = tk.Frame(notebook)
+
+notebook.add(home_tab, text="Home")
+notebook.add(regression_tab, text="Regression")
+notebook.add(classification_tab, text="Classification")
+notebook.add(clustering_tab, text="Clustering")
+
+# Load product data for classification and clustering
+product_data = pd.read_csv('22_product_quantities_random_restock_limited_no_stock.csv')
+product_data['Sales_Volume'] = product_data.iloc[:, 1:].apply(lambda x: -pd.to_numeric(x.diff(), errors='coerce').fillna(0)[x.diff() < 0].sum(), axis=1)
+product_data['Restock_Frequency'] = product_data.iloc[:, 1:].apply(lambda x: pd.to_numeric(x.diff(), errors='coerce').fillna(0)[x.diff() > 0].count(), axis=1)
+product_data['Log_Sales_Volume'] = np.log1p(product_data['Sales_Volume'])
+product_data['Log_Restock_Frequency'] = np.log1p(product_data['Restock_Frequency'])
+
+# Home tab with grid layout for graphs
+fig_home = plt.figure(figsize=(18, 10))
+gs = gridspec.GridSpec(2, 2, height_ratios=[1, 1], hspace=0.5)
+ax1 = fig_home.add_subplot(gs[0, 0])   # Top-left for revenue by category graph
+ax3 = fig_home.add_subplot(gs[0, 1])   # Top-right for stock level graph
+ax2 = fig_home.add_subplot(gs[1, :])   # Bottom for real-time revenue graph
+
+# Embed Home tab graph canvas in Tkinter
+canvas_home = FigureCanvasTkAgg(fig_home, master=home_tab)
+canvas_home.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+# Dropdown for selecting product in Home tab (for stock level graph)
+dropdown_frame = tk.Frame(home_tab, bg="#2C3E50")
+dropdown_frame.place(relx=0.71, rely=0.07, anchor="center")
+dropdown_label = tk.Label(dropdown_frame, text="Select Product:", fg="white", bg="#2C3E50", font=("Arial", 12))
+dropdown_label.pack(side=tk.LEFT, padx=5)
+
+# Initialize selected_product and bind dropdown
+selected_product = tk.StringVar(value=data_transposed.columns[0])
+dropdown = ttk.Combobox(dropdown_frame, textvariable=selected_product, values=list(data_transposed.columns), width=25, font=("Arial", 10))
+dropdown.pack(side=tk.LEFT)
 selected_product.trace("w", on_dropdown_change)
 
 # Start animations for the graphs
@@ -160,170 +349,10 @@ anim1 = FuncAnimation(fig_home, animate_first_graph, frames=100, interval=100, r
 anim2 = FuncAnimation(fig_home, animate_second_graph, frames=1000, interval=1000, repeat=True)
 start_third_graph_animation()
 
-# Regression Tab: Set up linear and decision tree regression plots
-fig_reg, (ax_reg1, ax_reg2) = plt.subplots(1, 2, figsize=(14, 6))
-
-# Dropdown to select category for regression analysis
-categories = grouped_data_first_graph.columns.tolist()
-category_frame = tk.Frame(regression_tab, bg="#2C3E50")
-category_frame.pack(anchor="center", pady=5)
-category_label = tk.Label(category_frame, text="Select Category:", fg="white", bg="#2C3E50", font=("Arial", 12))
-category_label.pack(side=tk.LEFT, padx=5)
-selected_category = tk.StringVar(value=categories[0])
-category_dropdown = ttk.Combobox(category_frame, textvariable=selected_category, values=categories, width=25, font=("Arial", 10))
-category_dropdown.pack(side=tk.LEFT)
-
-# Function to prepare data for regression based on selected category
-def load_and_prepare_regression_data(category):
-    data = pd.read_csv('shopee_sales_report_2022_to_2024.csv')
-    data_filtered = data[data['Product Category'] == category].copy()
-    data_filtered['DateTime'] = pd.to_datetime(data_filtered['DateTime'], dayfirst=True, errors='coerce')
-    data_filtered['MonthYear'] = data_filtered['DateTime'].dt.to_period('M')
-    grouped_data = data_filtered.groupby('MonthYear')['Revenue (MYR)'].sum().reset_index()
-    grouped_data['MonthYear'] = grouped_data['MonthYear'].dt.to_timestamp()
-    grouped_data['MonthNumber'] = np.arange(len(grouped_data))
-    return grouped_data
-
-# Function to update regression plots based on selected category
-def update_regression_plots(*args):
-    ax_reg1.cla()
-    ax_reg2.cla()
-    
-    regression_data = load_and_prepare_regression_data(selected_category.get())
-    if not regression_data.empty:
-        X_full = regression_data[['MonthNumber']]
-        y_full = regression_data['Revenue (MYR)']
-
-        # Linear Regression Plot
-        model = LinearRegression()
-        model.fit(X_full, y_full)
-        predictions_full = model.predict(X_full)
-        ax_reg1.plot(regression_data['MonthYear'], y_full, 'o', label='Actual Revenue', color='blue')
-        ax_reg1.plot(regression_data['MonthYear'], predictions_full, label='Predicted Revenue', color='red')
-        ax_reg1.set_xlabel('Month')
-        ax_reg1.set_ylabel('Revenue (MYR)')
-        ax_reg1.set_title(f'Linear Regression of Monthly Revenue for {selected_category.get()}')
-        ax_reg1.legend()
-        ax_reg1.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
-        ax_reg1.tick_params(axis='x', rotation=55, labelsize=6)
-
-        # Decision Tree Regression Plot
-        X_high_res = pd.DataFrame({'MonthNumber': np.arange(X_full['MonthNumber'].min(), X_full['MonthNumber'].max() + 1, 0.1)})
-        ax_reg2.scatter(X_full, y_full, color='orange', label='Actual Data')
-        model_min_depth = DecisionTreeRegressor(max_depth=2, random_state=0)
-        model_min_depth.fit(X_full, y_full)
-        pred_min_depth = model_min_depth.predict(X_high_res)
-        ax_reg2.plot(X_high_res['MonthNumber'], pred_min_depth, color='blue', label='min depth (max_depth=2)')
-        model_max_depth = DecisionTreeRegressor(max_depth=5, random_state=0)
-        model_max_depth.fit(X_full, y_full)
-        pred_max_depth = model_max_depth.predict(X_high_res)
-        ax_reg2.plot(X_high_res['MonthNumber'], pred_max_depth, color='green', label='max depth (max_depth=5)')
-        ax_reg2.set_xlabel('Month')
-        ax_reg2.set_ylabel('Revenue (MYR)')
-        ax_reg2.set_title(f'Decision Tree Regression of Monthly Revenue for {selected_category.get()}')
-        ax_reg2.legend()
-        month_labels = pd.date_range(start=regression_data['MonthYear'].iloc[0], periods=len(X_full), freq='MS').strftime('%b %Y')
-        ax_reg2.set_xticks(X_full['MonthNumber'])
-        ax_reg2.set_xticklabels(month_labels, rotation=55, ha="right", fontsize=6)
-
-    canvas_reg.draw()
-
-# Bind category dropdown selection to update function
-selected_category.trace("w", update_regression_plots)
-
-# Embed regression plots in Tkinter
-canvas_reg = FigureCanvasTkAgg(fig_reg, master=regression_tab)
-canvas_reg.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
-
-# Initialize regression plots
-update_regression_plots()
-
-# Classification & Clustering Tab Content with Logistic Regression, SVM, K-Means, and Dendrogram
-fig_class_cluster, axs = plt.subplots(2, 2, figsize=(14, 10), tight_layout=True)
-
-# (Graph 1) Logistic Regression with annotations
-product_data = pd.read_csv('22_product_quantities_random_restock_limited_no_stock.csv')
-sales_volumes = []
-restock_frequencies = []
-for _, row in product_data.iterrows():
-    daily_changes = pd.to_numeric(row[1:].diff(), errors='coerce').fillna(0)
-    sales_volume = -daily_changes[daily_changes < 0].sum()
-    restock_frequency = (daily_changes > 0).sum()
-    sales_volumes.append(sales_volume)
-    restock_frequencies.append(restock_frequency)
-product_data['Sales_Volume'] = sales_volumes
-product_data['Restock_Frequency'] = restock_frequencies
-product_data['Log_Sales_Volume'] = np.log1p(product_data['Sales_Volume'])
-product_data['Log_Restock_Frequency'] = np.log1p(product_data['Restock_Frequency'])
-X = product_data[['Log_Sales_Volume']].values
-y = (product_data['Sales_Volume'] > np.median(product_data['Sales_Volume'])).astype(int)
-scaler = StandardScaler()
-X_standardized = scaler.fit_transform(X)
-model = LogisticRegression()
-model.fit(X_standardized, y)
-X_test_standardized = np.linspace(X_standardized.min() - 1, X_standardized.max() + 1, 300).reshape(-1, 1)
-y_prob = model.predict_proba(X_test_standardized)[:, 1]
-axs[0, 0].scatter(X_standardized[y == 0], y[y == 0], color='red', s=50, label="Low Demand", marker='o')
-axs[0, 0].scatter(X_standardized[y == 1], y[y == 1], color='green', s=50, label="High Demand", marker='o')
-axs[0, 0].plot(X_test_standardized, y_prob, color='blue', linewidth=2, label="Logistic Regression Curve")
-axs[0, 0].axhline(y=0.5, color='gray', linestyle='--')
-axs[0, 0].annotate('Threshold', xy=(0, 0.5), xytext=(-1.5, 0.4),
-                   arrowprops=dict(facecolor='black', arrowstyle='->'))
-axs[0, 0].text(X_standardized.min() - 0.5, 0.05, "Low Demand", color="red", verticalalignment='center')
-axs[0, 0].text(X_standardized.max() + 0.5, 0.95, "High Demand", color="green", verticalalignment='center')
-axs[0, 0].set_title("Logistic Regression Demand Classification")
-axs[0, 0].set_xlabel("Sales Volume")
-axs[0, 0].set_ylabel("Probability of High Demand")
-axs[0, 0].legend()
-axs[0, 0].grid(True)
-
-# (Graph 2) SVM Classification
-X = product_data[['Log_Sales_Volume', 'Log_Restock_Frequency']].values
-scaler = StandardScaler()
-X_standardized = scaler.fit_transform(X)
-threshold = np.median(sales_volumes)
-y = np.array([1 if volume > threshold else 0 for volume in sales_volumes])
-svm_model = SVC(kernel='linear')
-svm_model.fit(X_standardized, y)
-w = svm_model.coef_[0]
-a = -w[0] / w[1]
-xx = np.linspace(X_standardized[:, 0].min() - 1, X_standardized[:, 0].max() + 1)
-yy = a * xx - (svm_model.intercept_[0]) / w[1]
-axs[0, 1].scatter(X_standardized[y == 0][:, 0], X_standardized[y == 0][:, 1], color='blue', s=100, label="Low Demand", marker='o')
-axs[0, 1].scatter(X_standardized[y == 1][:, 0], X_standardized[y == 1][:, 1], color='orange', s=100, label="High Demand", marker='^')  # Triangle for High Demand
-axs[0, 1].plot(xx, yy, 'r--', label="Hyperline")
-axs[0, 1].set_xlim(-2, 2)
-axs[0, 1].set_ylim(-2, 2)
-axs[0, 1].set_title("SVM Demand Classification")
-axs[0, 1].set_xlabel("Log-Transformed Sales Volume")
-axs[0, 1].set_ylabel("Log-Transformed Restock Frequency")
-axs[0, 1].legend()
-axs[0, 1].grid(True)
-
-# (Graph 3) K-Means Clustering
-X = product_data[['Sales_Volume', 'Restock_Frequency']].values
-kmeans = KMeans(n_clusters=2, random_state=0)
-y_kmeans = kmeans.fit_predict(X)
-centers = kmeans.cluster_centers_
-axs[1, 0].scatter(X[y_kmeans == 0][:, 0], X[y_kmeans == 0][:, 1], color='blue', label="Low Demand", marker='^')
-axs[1, 0].scatter(X[y_kmeans == 1][:, 0], X[y_kmeans == 1][:, 1], color='red', label="High Demand", marker='o')
-axs[1, 0].scatter(centers[:, 0], centers[:, 1], color='black', marker='X', s=200, label="Centroids")
-axs[1, 0].set_title("K-Means Clustering")
-axs[1, 0].set_xlabel("Sales Volume")
-axs[1, 0].set_ylabel("Restock Frequency")
-axs[1, 0].legend()
-axs[1, 0].grid(True)
-
-# (Graph 4) Hierarchical Clustering Dendrogram
-Z = linkage(X, method='ward')
-dendrogram(Z, labels=product_data['Product'].values, leaf_rotation=55, leaf_font_size=3, ax=axs[1, 1])
-axs[1, 1].set_title("Hierarchical Clustering Dendrogram")
-axs[1, 1].set_xlabel("Products")
-axs[1, 1].set_ylabel("Distance")
-
-# Embed classification & clustering plots in Tkinter
-canvas_class_cluster = FigureCanvasTkAgg(fig_class_cluster, master=classification_clustering_tab)
-canvas_class_cluster.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+# Call functions to set up Classification, Regression, and Clustering graphs
+setup_regression_graphs(regression_tab)
+setup_classification_graphs(classification_tab, product_data)
+setup_clustering_graphs(clustering_tab, product_data)
 
 # Run Tkinter main loop
 root.mainloop()
