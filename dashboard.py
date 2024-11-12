@@ -85,112 +85,114 @@ def regression_performance_metrics(y_true, y_pred, model_name):
     st.table(metrics_df)
 
 
-# Train and predict using regression models
-def train_and_predict(df, base_year, target_year):
-    # Filter training data based on the specified base year
-    train_data = df[df['Year'] == base_year]
-    X_train = train_data[['Year', 'Month']]
-    y_train = train_data['Revenue (MYR)']
-
-    # Prepare target data for the prediction year (target_year) with 12 months
-    target_data = pd.DataFrame({'Year': [target_year] * 12, 'Month': list(range(1, 13))})
-
-    # Train a Linear Regression model and predict target year revenue
-    linear_reg = LinearRegression().fit(X_train, y_train)
-    target_data['Linear Regression'] = linear_reg.predict(target_data[['Year', 'Month']])
-
-    # Train Decision Tree Regression models with different depths and predict target year revenue
-    decision_tree_reg_depth_2 = DecisionTreeRegressor(max_depth=2, random_state=0).fit(X_train, y_train)
-    target_data['Decision Tree Depth 2'] = decision_tree_reg_depth_2.predict(target_data[['Year', 'Month']])
-
-    decision_tree_reg_depth_5 = DecisionTreeRegressor(max_depth=5, random_state=0).fit(X_train, y_train)
-    target_data['Decision Tree Depth 5'] = decision_tree_reg_depth_5.predict(target_data[['Year', 'Month']])
-
-    # Include target year in the target data for consistency
-    target_data['Year'] = target_year
-    return target_data
-
-
-# Plot predictions and actual data using Altair
-def plot_chart(pred_df, monthly_revenue, actual_year, title, model_name, include_actual):
-    # Prepare actual data if including actual results in the chart
-    if include_actual:
-        actual_data = monthly_revenue[monthly_revenue['Year'] == actual_year].copy()
-        actual_data['Model'] = 'Actual Revenue'
-        actual_data = actual_data.rename(columns={'Revenue (MYR)': 'Predicted Revenue'})
-        actual_data['Date'] = pd.to_datetime(
-            actual_data['Year'].astype(str) + '-' + actual_data['Month'].astype(str) + '-01')
-    else:
-        actual_data = pd.DataFrame(columns=['Date', 'Predicted Revenue', 'Model'])
-
-    # Prepare data for plotting only the specified model
-    pred_df = pred_df[['Year', 'Month', model_name]]
-    pred_df = pred_df.rename(columns={model_name: 'Predicted Revenue'})
-    pred_df['Model'] = model_name
-    pred_df['Date'] = pd.to_datetime(pred_df['Year'].astype(str) + '-' + pred_df['Month'].astype(str) + '-01')
-
-    # Combine actual and predicted data for visualization
-    combined_data = pd.concat([actual_data[['Date', 'Predicted Revenue', 'Model']], pred_df], ignore_index=True)
-
-    # Define color scale for lines to distinguish between actual and predicted data
-    color_scale = alt.Scale(domain=['Actual Revenue', model_name], range=['#1f77b4', '#2ca02c'])
-
-    # Create and return an Altair chart for the predictions
-    chart = alt.Chart(combined_data).mark_line(point=True).encode(
-        x=alt.X('Date:T', title='Month', axis=alt.Axis(format="%b %Y", labelAngle=-90)),
-        y=alt.Y('Predicted Revenue:Q', title='Revenue (MYR)'),
-        color=alt.Color('Model:N', scale=color_scale),
-        tooltip=['Date:T', 'Predicted Revenue:Q', 'Model:N']
-    ).properties(
-        title=title
-    ).interactive()
-
-    return chart
-
-
-# Predict revenue for 2023 and 2024 and display performance metrics
+# Revenue Prediction using Regression models by Month
 def revenue_prediction():
-    # Prepare the monthly revenue data for predictions
-    monthly_data['YearMonth'] = monthly_data['DateTime'].dt.to_period('M').dt.to_timestamp()
-    monthly_revenue = monthly_data.groupby('YearMonth')['Revenue (MYR)'].sum().reset_index()
-    monthly_revenue['Month'] = monthly_revenue['YearMonth'].dt.month
-    monthly_revenue['Year'] = monthly_revenue['YearMonth'].dt.year
+    # Aggregate data by month to get total revenue per month
+    monthly_revenue = monthly_data.copy()
+    monthly_revenue['YearMonth'] = monthly_revenue['DateTime'].dt.to_period('M').dt.to_timestamp()
+    monthly_revenue = monthly_revenue.groupby('YearMonth')['Revenue (MYR)'].sum().reset_index()
 
-    # Generate predictions for 2023 and 2024 using the previous year's data
-    predictions_2023_df = train_and_predict(monthly_revenue, base_year=2022, target_year=2023)
-    predictions_2024_df = train_and_predict(monthly_revenue, base_year=2023, target_year=2024)
+    # Calculate MonthNumber starting from January 2022
+    start_date = pd.to_datetime("2022-01-01")
+    monthly_revenue['MonthNumber'] = ((monthly_revenue['YearMonth'].dt.year - start_date.year) * 12 +
+                                      (monthly_revenue['YearMonth'].dt.month - start_date.month) + 1)
 
-    # Extract actual revenue data for 2023 to compare with predictions
-    actual_revenue_2023 = monthly_revenue[monthly_revenue['Year'] == 2023]['Revenue (MYR)']
+    if monthly_revenue.empty:
+        st.warning("No data available for the monthly revenue.")
+        return
 
-    # Display regression predictions and metrics for each model on the 2023 data
-    for model in ['Linear Regression', 'Decision Tree Depth 2', 'Decision Tree Depth 5']:
-        st.altair_chart(plot_chart(predictions_2023_df, monthly_revenue, 2023,
-                                   f"Predicted and Actual Monthly Revenue ({model}) for 2023", model,
-                                   include_actual=True), use_container_width=True)
-        # Display performance metrics for each model based on the 2023 predictions
-        regression_performance_metrics(actual_revenue_2023, predictions_2023_df[model], model)
+    # Prepare data for modeling
+    X_full = monthly_revenue[['MonthNumber']]
+    y_full = monthly_revenue['Revenue (MYR)']
 
-    # Display 2024 predictions with different models (without actual data, as it is future)
-    st.altair_chart(
-        plot_chart(predictions_2024_df, monthly_revenue, 2024, "Predicted Monthly Revenue (Linear Regression) for 2024",
-                   'Linear Regression', include_actual=False),
-        use_container_width=True
+    # Linear Regression Model
+    model = LinearRegression()
+    model.fit(X_full, y_full)
+    monthly_revenue['Linear Regression'] = model.predict(X_full)
+
+    # Decision Tree Regressor with different depths
+    X_high_res = pd.DataFrame({
+        'MonthNumber': np.arange(X_full['MonthNumber'].min(), X_full['MonthNumber'].max() + 1, 0.1)
+    })
+    X_high_res['YearMonth'] = start_date + pd.to_timedelta((X_high_res['MonthNumber'] - 1) * 30, unit='D')
+
+    model_depth_2 = DecisionTreeRegressor(max_depth=2, random_state=0)
+    model_depth_2.fit(X_full, y_full)
+    monthly_revenue['Decision Tree Depth 2'] = model_depth_2.predict(X_full)
+    X_high_res['Decision Tree Depth 2'] = model_depth_2.predict(X_high_res[['MonthNumber']])
+
+    model_depth_5 = DecisionTreeRegressor(max_depth=5, random_state=0)
+    model_depth_5.fit(X_full, y_full)
+    monthly_revenue['Decision Tree Depth 5'] = model_depth_5.predict(X_full)
+    X_high_res['Decision Tree Depth 5'] = model_depth_5.predict(X_high_res[['MonthNumber']])
+
+    # Convert prediction data to long format for Altair
+    melted_preds = pd.melt(
+        X_high_res, id_vars='YearMonth', value_vars=['Decision Tree Depth 2', 'Decision Tree Depth 5'],
+        var_name='Model', value_name='Predicted Revenue'
     )
 
-    st.altair_chart(
-        plot_chart(predictions_2024_df, monthly_revenue, 2024,
-                   "Predicted Monthly Revenue (Decision Tree Depth 2) for 2024", 'Decision Tree Depth 2',
-                   include_actual=False),
-        use_container_width=True
+    # Prepare Altair charts
+    base = alt.Chart(monthly_revenue).encode(
+        x=alt.X('YearMonth:T', title='Month', axis=alt.Axis(format="%b %Y", labelAngle=-45, tickCount="month"))
     )
 
-    st.altair_chart(
-        plot_chart(predictions_2024_df, monthly_revenue, 2024,
-                   "Predicted Monthly Revenue (Decision Tree Depth 5) for 2024", 'Decision Tree Depth 5',
-                   include_actual=False),
-        use_container_width=True
+    # Actual Revenue as dots and Linear Regression as a line
+    actual_dots = base.mark_point(color='#90D5FF', filled=True).encode(
+        y=alt.Y('Revenue (MYR):Q', title='Revenue (MYR)'),
+        tooltip=['YearMonth:T', 'Revenue (MYR):Q']
     )
+
+    linear_reg_line = base.mark_line(color='red').encode(
+        y='Linear Regression:Q',
+        tooltip=['YearMonth:T', 'Linear Regression:Q']
+    )
+
+    # Decision Tree Depth 2 line
+    decision_tree_depth_2_line = alt.Chart(melted_preds).transform_filter(
+        alt.datum.Model == 'Decision Tree Depth 2'
+    ).mark_line(color='orange').encode(
+        x='YearMonth:T',
+        y='Predicted Revenue:Q',
+        tooltip=['YearMonth:T', 'Predicted Revenue:Q']
+    )
+
+    # Decision Tree Depth 5 line
+    decision_tree_depth_5_line = alt.Chart(melted_preds).transform_filter(
+        alt.datum.Model == 'Decision Tree Depth 5'
+    ).mark_line(color='green').encode(
+        x='YearMonth:T',
+        y='Predicted Revenue:Q',
+        tooltip=['YearMonth:T', 'Predicted Revenue:Q']
+    )
+
+    # Combine actual dots with linear regression and decision tree lines into one chart
+    chart = actual_dots + linear_reg_line + decision_tree_depth_2_line + decision_tree_depth_5_line
+
+    # Display the chart
+    st.altair_chart(chart.interactive(), use_container_width=True)
+
+    # Display custom legend labels using HTML
+    st.markdown("""
+        <div style='text-align: left; margin-top: 5px; margin-bottom: 5px;'>
+            <strong>Model Legend:</strong>
+            <ul style='list-style-type: none; padding: 0;'>
+                <li><span style='color: #90D5FF;'> ● </span> Actual Revenue</li>
+                <li><span style='color: red;'> — </span> Linear Regression</li>
+                <li><span style='color: orange;'> — </span> Decision Tree Depth 2</li>
+                <li><span style='color: green;'> — </span> Decision Tree Depth 5</li>
+            </ul>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # Display metrics below the charts
+    st.subheader("Performance Metrics")
+    st.write("**Linear Regression**")
+    regression_performance_metrics(y_full, monthly_revenue['Linear Regression'], "Linear Regression")
+    st.write("**Decision Tree Depth 2**")
+    regression_performance_metrics(y_full, monthly_revenue['Decision Tree Depth 2'], "Decision Tree Depth 2")
+    st.write("**Decision Tree Depth 5**")
+    regression_performance_metrics(y_full, monthly_revenue['Decision Tree Depth 5'], "Decision Tree Depth 5")
 
 
 # Display stock levels over time for a selected product using different chart types
@@ -700,6 +702,7 @@ with tab1:
     monthly_revenue_by_category()
 
 with tab2:
+    st.header("Linear and Decision Tree Regression with Actual Revenue")
     revenue_prediction()
 
 with tab3:
