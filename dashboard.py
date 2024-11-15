@@ -317,45 +317,50 @@ def logistic_regression_classification():
     X_test_standardized = np.linspace(X_standardized.min() - 1, X_standardized.max() + 1, 300).reshape(-1, 1)
     y_prob = model.predict_proba(X_test_standardized)[:, 1]  # Probability for the positive class (High Demand)
 
-    # Prepare data for plotting
+    # Prepare data for plotting with jitter added to avoid overlapping points
     chart_data = pd.DataFrame({
         'Sales_Volume_Standardized': X_standardized.flatten(),
-        'Probability_High_Demand': y,  # True labels for the scatter plot
+        'Probability_High_Demand': y,
         'Demand': np.where(y == 1, 'High Demand', 'Low Demand'),
         'Product': stock_data['Product']
     })
+    chart_data['Jitter'] = np.random.uniform(-0.1, 0.1, size=len(chart_data))
 
-    # Prepare data for plotting the logistic regression curve
-    curve_data = pd.DataFrame({
-        'Sales_Volume_Standardized': X_test_standardized.flatten(),
-        'Probability_High_Demand': y_prob
-    })
-
-    # Scatter plot of the actual demand data with color coding for High and Low Demand
+    # Scatter plot of the actual demand data with jitter
     scatter_chart = alt.Chart(chart_data).mark_point(filled=True).encode(
         x=alt.X('Sales_Volume_Standardized:Q', title='Sales Volume (Standardized)',
                 scale=alt.Scale(domain=[X_standardized.min() - 1, X_standardized.max() + 1])),
-        y=alt.Y('Probability_High_Demand:Q', title='Probability of High Demand', scale=alt.Scale(domain=[0, 1])),
+        y=alt.Y('Probability_High_Demand:Q', title='Probability of High Demand',
+                scale=alt.Scale(domain=[-0.1, 1.1])),
         color=alt.Color('Demand:N', scale=alt.Scale(domain=['Low Demand', 'High Demand'], range=['red', 'green'])),
-        tooltip=['Product', 'Sales_Volume_Standardized']  # Tooltip showing the product and its sales volume
+        tooltip=[
+            alt.Tooltip('Product:N', title='Product'),
+            alt.Tooltip('Sales_Volume_Standardized:Q', title='Sales Volume (Standardized)'),
+        ]
+    ).transform_calculate(
+        Probability_High_Demand='datum.Probability_High_Demand + datum.Jitter'
     ).properties(
         width=600,
         height=400,
     )
 
-    # Logistic regression curve line showing probability of High Demand
+    # Logistic regression curve showing probability of High Demand
+    curve_data = pd.DataFrame({
+        'Sales_Volume_Standardized': X_test_standardized.flatten(),
+        'Probability_High_Demand': y_prob
+    })
     curve_line = alt.Chart(curve_data).mark_line(color='blue').encode(
         x='Sales_Volume_Standardized',
         y='Probability_High_Demand'
     )
 
-    # Threshold line at 0.5 (the decision boundary) for classification
-    threshold_line = alt.Chart(pd.DataFrame({'y': [0.5]})).mark_rule(color='yellow', strokeDash=[5, 5]).encode(
+    # Threshold line at 0.5, indicating the decision boundary for classification
+    threshold_line = alt.Chart(pd.DataFrame({'y': [0.5]})).mark_rule(color='orange', strokeDash=[5, 5]).encode(
         y='y:Q'
     )
 
     # Arrow pointing to the threshold line
-    arrow_line = alt.Chart(pd.DataFrame({'x': [1.5], 'y': [0.55], 'y2': [0.6]})).mark_line(color='yellow').encode(
+    arrow_line = alt.Chart(pd.DataFrame({'x': [1.5], 'y': [0.55], 'y2': [0.6]})).mark_line(color='orange').encode(
         x='x:Q',
         y='y:Q',
         y2='y2:Q'
@@ -363,7 +368,7 @@ def logistic_regression_classification():
 
     # Arrow head to visually point to the threshold line
     arrow_head = alt.Chart(pd.DataFrame({'x': [1.5], 'y': [0.55]})).mark_point(
-        shape='triangle', size=100, angle=180, color='yellow'
+        shape='triangle', size=100, angle=180, color='orange'
     ).encode(
         x='x:Q',
         y='y:Q'
@@ -371,14 +376,14 @@ def logistic_regression_classification():
 
     # Label for the threshold line
     threshold_label = alt.Chart(pd.DataFrame({'x': [1.6], 'y': [0.55], 'text': ['Threshold = 0.5']})).mark_text(
-        align='left', baseline='middle', dx=5, color='yellow'
+        align='left', baseline='middle', dx=5, color='orange'
     ).encode(
         x='x:Q',
         y='y:Q',
         text='text:N'
     )
 
-    # Combine the scatter plot, regression line, threshold line, arrow, and threshold label
+    # Combine the scatter plot, regression line, threshold line, arrows, and threshold label
     combined_chart = scatter_chart + curve_line + threshold_line + arrow_line + arrow_head + threshold_label
     st.altair_chart(combined_chart, use_container_width=True)
 
@@ -433,22 +438,27 @@ def classification_svm():
     chart_data['Demand'] = np.where(y == 1, 'High Demand', 'Low Demand')
     chart_data['Product'] = stock_data['Product']
 
+    # Add jitter to avoid overlapping points in the scatter plot
+    chart_data['Jitter_X'] = chart_data['Standardized_Log_Sales_Volume'] + np.random.uniform(-0.1, 0.1,
+                                                                                             size=len(chart_data))
+    chart_data['Jitter_Y'] = chart_data['Standardized_Log_Restock_Frequency'] + np.random.uniform(-0.1, 0.1,
+                                                                                                  size=len(chart_data))
+
     # Get the coefficients of the SVM model to calculate the decision boundary line
     w = svm_model.coef_[0]
     b = svm_model.intercept_[0]
     a = -w[0] / w[1]  # Slope of the decision boundary
 
-    # Define the x-axis range for plotting the decision boundary
-    x_min = chart_data['Standardized_Log_Sales_Volume'].min() - 1
-    x_max = chart_data['Standardized_Log_Sales_Volume'].max() + 1
-    xx = np.linspace(x_min, x_max, num=100)
+    # Define the range for plotting the decision boundary
+    xx = np.linspace(chart_data['Standardized_Log_Sales_Volume'].min() - 1,
+                     chart_data['Standardized_Log_Sales_Volume'].max() + 1, num=100)
     yy = a * xx - (b / w[1])  # Decision boundary equation
     boundary_data = pd.DataFrame({'Standardized_Log_Sales_Volume': xx, 'Standardized_Log_Restock_Frequency': yy})
 
-    # Scatter plot of data points (sales volume and restock frequency), color-coded by demand
+    # Scatter plot of data points (sales volume and restock frequency), color-coded by demand with jitter
     scatter_chart = alt.Chart(chart_data).mark_point(filled=True).encode(
-        x=alt.X('Standardized_Log_Sales_Volume:Q', title='Log-Transformed Sales Volume (Standardized)'),
-        y=alt.Y('Standardized_Log_Restock_Frequency:Q', title='Log-Transformed Restock Frequency (Standardized)'),
+        x=alt.X('Jitter_X:Q', title='Log-Transformed Sales Volume (Standardized)'),
+        y=alt.Y('Jitter_Y:Q', title='Log-Transformed Restock Frequency (Standardized)'),
         color=alt.Color('Demand:N', scale=alt.Scale(domain=['Low Demand', 'High Demand'], range=['blue', 'orange'])),
         tooltip=['Product', 'Demand']
     ).properties(
@@ -596,6 +606,9 @@ def kmeans_clustering_chart():
 def hierarchical_clustering_analysis():
     st.subheader("Hierarchical Clustering for Product Demand Levels")
 
+    # Calculate sales volume and restock frequency for the dataset
+    calculate_sales_and_restock(stock_data)
+
     # Prepare data for clustering: Remove missing values and select relevant numeric columns
     stock_data.dropna(subset=['Sales_Volume', 'Restock_Frequency'], inplace=True)
     X = stock_data[['Sales_Volume', 'Restock_Frequency']].values  # Features for clustering
@@ -690,7 +703,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "Revenue Prediction using Regression",
     "Stock Level by Product",
     "Classification for Product Demand",
-    "Clustering for Demand",
+    "Clustering for Product Demand",
     "Real-Time Revenue"
 ])
 
