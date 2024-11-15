@@ -606,9 +606,6 @@ def kmeans_clustering_chart():
 def hierarchical_clustering_analysis():
     st.subheader("Hierarchical Clustering for Product Demand Levels")
 
-    # Calculate sales volume and restock frequency for the dataset
-    calculate_sales_and_restock(stock_data)
-
     # Prepare data for clustering: Remove missing values and select relevant numeric columns
     stock_data.dropna(subset=['Sales_Volume', 'Restock_Frequency'], inplace=True)
     X = stock_data[['Sales_Volume', 'Restock_Frequency']].values  # Features for clustering
